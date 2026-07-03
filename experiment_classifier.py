@@ -39,15 +39,33 @@ def assign_evidence_grade(
 
 
 def extract_mutation_effect_summary(record: dict[str, Any]) -> dict[str, Any]:
-    """Extract structured mutation evidence using evidence_extractor.py."""
-    title = str(record.get("title", "") or "")
-    abstract = str(record.get("abstract", "") or "")
+    """Extract structured mutation evidence using full text only."""
     full_text = str(record.get("full_text", "") or "")
     mutation = record.get("mutation") or record.get("aa_change") or record.get("query")
 
+    if not full_text.strip():
+        return {
+            "mutation_sentence": "",
+            "effect_sentence": "",
+            "methods_sentence": "",
+            "results_sentence": "",
+            "discussion_sentence": "",
+            "host": "",
+            "cell_line": "",
+            "experiment_type": "",
+            "effect": "",
+            "confidence": 0,
+            "effect_terms_found": "",
+            "methods_in_vivo": 0,
+            "methods_in_vitro": 0,
+            "methods_in_vivo_terms_found": "",
+            "methods_in_vitro_terms_found": "",
+            "evidence_grade": "E",
+        }
+
     evidence = extract_evidence(
-        title=title,
-        abstract=abstract,
+        title="",
+        abstract="",
         full_text=full_text,
         mutation=str(mutation) if mutation is not None else None,
     )
@@ -89,10 +107,14 @@ def detect_animal_experiment_rule(record: dict[str, Any]) -> dict[str, Any]:
       - ``species``: list of matched animal species
       - ``evidence``: concatenated evidence string describing the hits
     """
-    title = record.get("title", "")
-    abstract = record.get("abstract", "")
-    full_text = record.get("full_text", "")
-    text = f"{title} {abstract} {full_text}".lower()
+    full_text = str(record.get("full_text", "") or "")
+    if not full_text.strip():
+        return {
+            "flag": 0,
+            "species": [],
+            "evidence": "No full text available; in vivo rule not applied",
+        }
+    text = full_text.lower()
 
     animal_species_keywords = [
         "mouse", "mice", "murine",
@@ -107,6 +129,7 @@ def detect_animal_experiment_rule(record: dict[str, Any]) -> dict[str, Any]:
         "guinea pig", "guinea pigs",
         "hamster", "hamsters",
         "macaque", "monkey", "nonhuman primate",
+        "avian", "bird", "birds", "poultry",
     ]
 
     experiment_keywords = [
@@ -167,6 +190,7 @@ def detect_animal_experiment_mesh(record: dict[str, Any]) -> dict[str, Any]:
         "swine",
         "disease models, animal",
         "animal experimentation",
+        "birds", "poultry"
     ]
     mesh_experiment_terms = [
         "disease models, animal",
@@ -210,20 +234,18 @@ def detect_animal_experiment_llm(record: dict[str, Any], client: Any) -> dict[st
             "evidence": "LLM skipped: OPENAI_API_KEY not set or openai package not installed",
         }
     pmid = record.get("PMID", "")
-    title = record.get("title", "")
-    abstract = record.get("abstract", "")
-    full_text = record.get("full_text", "")
+    full_text = str(record.get("full_text", "") or "")
     full_text_excerpt = full_text[:6000]
 
-    if not title and not abstract and not full_text:
-        return {"flag": 0, "evidence": "No title/abstract/full_text available"}
+    if not full_text.strip():
+        return {"flag": 0, "evidence": "No full text available; LLM in vivo classification skipped"}
     prompt = f"""
 Classify whether this PubMed record describes an in vivo animal experiment.
 
 IMPORTANT:
 Do NOT classify review articles as animal experiments.
 
-Use only the title, abstract, and available full-text excerpt.
+Use only the available full-text excerpt. Do not infer from title or abstract.
 
 Return JSON only with keys:
 - animal_experiment: 1 or 0
@@ -231,7 +253,7 @@ Return JSON only with keys:
 - evidence: short reason, maximum 30 words
 
 Definition:
-animal_experiment = 1 only if the title/abstract indicate experimental use of animals,
+animal_experiment = 1 only if the full-text excerpt indicates experimental use of animals,
 such as infection, inoculation, challenge, transmission, pathogenicity, virulence,
 replication, survival, or mortality testing in animals.
 
@@ -243,8 +265,6 @@ Do not count:
 - cell culture only
 
 PMID: {pmid}
-Title: {title}
-Abstract: {abstract}
 Full text excerpt: {full_text_excerpt}
 """
     try:
@@ -279,11 +299,15 @@ def detect_in_vitro_rule(record: dict[str, Any]) -> dict[str, Any]:
     a cell term and an experiment term are found, the record is flagged as
     an in vitro experiment.
     """
-    title = record.get("title", "")
-    abstract = record.get("abstract", "")
-    full_text = record.get("full_text", "")
+    full_text = str(record.get("full_text", "") or "")
+    if not full_text.strip():
+        return {
+            "flag": 0,
+            "cell_types": [],
+            "evidence": "No full text available; in vitro rule not applied",
+        }
 
-    text = f"{title} {abstract} {full_text}".lower()
+    text = full_text.lower()
     cell_keywords = [
         "in vitro", "cell culture", "cell line", "cell lines", "cells",
         "mdck", "vero", "293t", "hepg2", "hek-293", "hek293", "a549",
@@ -359,20 +383,18 @@ def detect_in_vitro_llm(record: dict[str, Any], client: Any) -> dict[str, Any]:
             "evidence": "LLM skipped: OPENAI_API_KEY not set or openai package not installed",
         }
     pmid = record.get("PMID", "")
-    title = record.get("title", "")
-    abstract = record.get("abstract", "")
-    full_text = record.get("full_text", "")
+    full_text = str(record.get("full_text", "") or "")
     full_text_excerpt = full_text[:6000]
 
-    if not title and not abstract and not full_text:
-        return {"flag": 0, "cell_types": [], "evidence": "No title/abstract/full_text available"}
+    if not full_text.strip():
+        return {"flag": 0, "cell_types": [], "evidence": "No full text available; LLM in vitro classification skipped"}
     prompt = f"""
 Classify whether this PubMed record describes an in vitro cell‑culture experiment.
 
 IMPORTANT:
 Do NOT classify review articles as experiments.
 
-Use only the title, abstract, and available full-text excerpt.
+Use only the available full-text excerpt. Do not infer from title or abstract.
 
 Return JSON only with keys:
 - in_vitro_experiment: 1 or 0
@@ -380,7 +402,7 @@ Return JSON only with keys:
 - evidence: short reason, maximum 30 words
 
 Definition:
-in_vitro_experiment = 1 only if the title/abstract indicate experimental use of
+in_vitro_experiment = 1 only if the full-text excerpt indicates experimental use of
 cell culture or cell lines, such as infection, inoculation, replication,
 propagation, plaque assays or growth of influenza virus in cells.
 
@@ -392,8 +414,6 @@ Do not count:
 - in vivo animal experiments
 
 PMID: {pmid}
-Title: {title}
-Abstract: {abstract}
 Full text excerpt: {full_text_excerpt}
 """
     try:

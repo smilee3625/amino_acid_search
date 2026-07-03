@@ -75,6 +75,8 @@ def search_and_analyze_mutation(
         "full_text_pmids": "",
         "full_text_source": "",
         "full_text_status": "NOT_FOUND",
+        "no_full_text_paper_count": 0,
+        "no_full_text_pmids": "",
         "in_vivo_pmids": "",
         "in_vitro_pmids": "",
         "in_vivo_experiment_rule": 0,
@@ -182,6 +184,20 @@ def search_and_analyze_mutation(
             result["full_text_status"] = "ERROR"
         else:
             result["full_text_status"] = "NOT_FOUND"
+
+        # Force downstream interpretation to use full text only.
+        # Papers without retrieved full text are kept out of in-vivo/in-vitro
+        # classification so the final calls are not made from title/abstract alone.
+        no_full_text_pmids = [
+            str(detail.get("PMID", ""))
+            for detail in details
+            if not detail.get("full_text")
+        ]
+        details = [detail for detail in details if detail.get("full_text")]
+
+        result["no_full_text_paper_count"] = len([pmid for pmid in no_full_text_pmids if pmid])
+        result["no_full_text_pmids"] = ";".join(sorted(set(pmid for pmid in no_full_text_pmids if pmid)))
+        result["analyzed_paper_count"] = len(details)
 
         # Initialize accumulators
         vivo_rule_flags: List[int] = []
